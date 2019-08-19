@@ -1,119 +1,57 @@
 package parser
 
 import (
-	"github.com/egoholic/migrator/migration/parser/biter"
+	"sync"
+
+	"github.com/egoholic/migrator/migration/parser/riter"
 	"github.com/egoholic/migrator/migration/parser/vertex"
-	"github.com/egoholic/migrator/migration/parser/vertex/pattern"
 )
 
-type (
-	Result struct {
-		Up   []string
-		Down []string
-	}
-
-	Parser struct {
-		graph   *vertex.Vertex
-		parent  *vertex.Vertex
-		in      chan byte
-		stopSig chan bool
-		out     chan []byte
-	}
-)
+type Parser struct {
+	graph   *vertex.Vertex
+	parent  *vertex.Vertex
+	in      chan rune
+	stopSig chan bool
+	out     chan []rune
+	wg      sync.WaitGroup
+	result  [][]rune
+}
 
 func New(graph *vertex.Vertex) *Parser {
 	return &Parser{
 		graph:   graph,
 		parent:  graph,
-		in:      make(chan byte),
+		in:      make(chan rune),
 		stopSig: make(chan bool),
-		out:     make(chan []byte),
+		out:     make(chan []rune),
+		result:  [][]rune{},
 	}
 }
-
-func (p *Parser) Parse(raw []byte) (result [][]byte, err error) {
-	iter := biter.New(raw)
+func (p *Parser) Parse(raw []rune) (result [][]rune, err error) {
+	iter := riter.New(raw)
 	for _, v := range p.parent.Edges {
-		go v.Pattern.Parse(p.in, p.stopSig, p.out)
+		p.wg.Add(1)
+		go v.Pattern.Parse(p.wg, p.in, p.stopSig, p.out)
 	}
-
+	p.wg.Add(1)
+	go p.parse(iter)
+	p.wg.Wait()
+	p.stopSig <- true
+	return
+}
+func (p *Parser) parse(iter *riter.Iterator) {
+	defer p.wg.Done()
 	for {
 		select {
 		case parsed := <-p.out:
 			p.stopSig <- true
-			result = append(result, parsed)
+			p.result = append(p.result, parsed)
+			// p.parent =
 		default:
-			for b, err := iter.Next(); err == nil; {
+			if iter.HasNext() {
+				b, _ := iter.Next()
 				p.in <- b
-			}
-		}
-	}
-
-	p.stopSig <- true
-	return
-}
-
-var (
-	upPattern          = pattern.New("UP", GenParserFn([]byte("-- <UP>\n")))
-	downPattern        = pattern.New("DOWN", GenParserFn([]byte("-- <DOWN>\n")))
-	andPattern         = pattern.New("AND", GenParserFn([]byte("-- <AND>\n")))
-	endPattern         = pattern.New("END", GenParserFn([]byte("-- <END>\n")))
-	instructionPattern = pattern.New("INSTRUCTION", instructionParserFn)
-
-	up        = vertex.New(upPattern)
-	upQuery   = vertex.New(instructionPattern)
-	upAnd     = vertex.New(andPattern)
-	down      = vertex.New(downPattern)
-	downQuery = vertex.New(instructionPattern)
-	downAnd   = vertex.New(andPattern)
-	end       = vertex.New(endPattern)
-
-	parsingGraph *vertex.Vertex
-)
-
-func init() {
-	up.AddTransitionsTo(upQuery)
-	upAnd.AddTransitionsTo(upQuery)
-	upQuery.AddTransitionsTo(upAnd, down)
-	down.AddTransitionsTo(downQuery)
-	downAnd.AddTransitionsTo(downQuery)
-	downQuery.AddTransitionsTo(downAnd, end)
-	parsingGraph = up
-}
-
-func instructionParserFn(in <-chan byte, stopSig <-chan bool, out chan<- []byte) {
-	var psd = make([]byte, 512)
-	for {
-		select {
-		case b := <-in:
-			psd = append(psd, b)
-		case <-stopSig:
-			out <- psd
-			return
-		}
-	}
-}
-func GenParserFn(ptrn []byte) pattern.ParserFn {
-	return func(in <-chan byte, stopSig <-chan bool, out chan<- []byte) {
-		var (
-			l    = len(ptrn)
-			last = ptrn[l-1]
-			cur  = 0
-			psd  = make([]byte, l)
-		)
-		for {
-			select {
-			case b := <-in:
-				if b != ptrn[cur] {
-					return
-				}
-				psd = append(psd, b)
-				cur++
-				if b == last {
-					out <- psd
-					return
-				}
-			case <-stopSig:
+			} else {
 				return
 			}
 		}
