@@ -1,75 +1,27 @@
 package parser
 
-import "errors"
+import (
+	"github.com/egoholic/migrator/migration/parser/biter"
+	"github.com/egoholic/migrator/migration/parser/vertex"
+	"github.com/egoholic/migrator/migration/parser/vertex/pattern"
+)
 
 type (
 	Result struct {
 		Up   []string
 		Down []string
 	}
-	Vertex struct {
-		Pattern *Pattern
-		Edges   []*Vertex
-	}
-	Pattern struct {
-		Name     string
-		parserFn ParserFn
-	}
-	ParserFn func(in <-chan byte, stopSig <-chan bool, out chan<- []byte)
-	Parser   struct {
-		graph   *Vertex
-		parent  *Vertex
+
+	Parser struct {
+		graph   *vertex.Vertex
+		parent  *vertex.Vertex
 		in      chan byte
 		stopSig chan bool
 		out     chan []byte
 	}
-
-	Iterator struct {
-		bytes []byte
-		len   int
-		cur   int
-	}
 )
 
-func (i Iterator) HasNext() bool {
-	return i.len > i.cur+1
-}
-
-func (i Iterator) Next() (b byte, err error) {
-	if i.HasNext() {
-		b = i.bytes[i.cur]
-		i.cur++
-		return b, nil
-	}
-	return b, errors.New("")
-}
-
-func NewIterator(bytes []byte) *Iterator {
-	return &Iterator{
-		bytes: bytes,
-		len:   len(bytes),
-		cur:   0,
-	}
-}
-
-func NewVertex(pattern *Pattern, edges ...*Vertex) *Vertex {
-	return &Vertex{
-		Pattern: pattern,
-		Edges:   edges,
-	}
-}
-
-func (v *Vertex) AddTransitionsTo(vertices ...*Vertex) {
-	for _, v := range vertices {
-		v.Edges = append(v.Edges, v)
-	}
-}
-
-func (v *Vertex) IsToken() bool {
-	return true
-}
-
-func New(graph *Vertex) *Parser {
+func New(graph *vertex.Vertex) *Parser {
 	return &Parser{
 		graph:   graph,
 		parent:  graph,
@@ -80,9 +32,9 @@ func New(graph *Vertex) *Parser {
 }
 
 func (p *Parser) Parse(raw []byte) (result [][]byte, err error) {
-	iter := NewIterator(raw)
+	iter := biter.New(raw)
 	for _, v := range p.parent.Edges {
-		go v.Pattern.parserFn(p.in, p.stopSig, p.out)
+		go v.Pattern.Parse(p.in, p.stopSig, p.out)
 	}
 
 	for {
@@ -102,51 +54,21 @@ func (p *Parser) Parse(raw []byte) (result [][]byte, err error) {
 }
 
 var (
-	upPattern = &Pattern{
-		Name:     "UP",
-		parserFn: GenParserFn([]byte("-- <UP>\n")),
-	}
+	upPattern          = pattern.New("UP", GenParserFn([]byte("-- <UP>\n")))
+	downPattern        = pattern.New("DOWN", GenParserFn([]byte("-- <DOWN>\n")))
+	andPattern         = pattern.New("AND", GenParserFn([]byte("-- <AND>\n")))
+	endPattern         = pattern.New("END", GenParserFn([]byte("-- <END>\n")))
+	instructionPattern = pattern.New("INSTRUCTION", instructionParserFn)
 
-	downPattern = &Pattern{
-		Name:     "DOWN",
-		parserFn: GenParserFn([]byte("-- <DOWN>\n")),
-	}
+	up        = vertex.New(upPattern)
+	upQuery   = vertex.New(instructionPattern)
+	upAnd     = vertex.New(andPattern)
+	down      = vertex.New(downPattern)
+	downQuery = vertex.New(instructionPattern)
+	downAnd   = vertex.New(andPattern)
+	end       = vertex.New(endPattern)
 
-	andPattern = &Pattern{
-		Name:     "AND",
-		parserFn: GenParserFn([]byte("-- <AND>\n")),
-	}
-
-	endPattern = &Pattern{
-		Name:     "END",
-		parserFn: GenParserFn([]byte("-- <END>\n")),
-	}
-
-	instructionPattern = &Pattern{
-		Name: "INSTRUCTION",
-		parserFn: func(in <-chan byte, stopSig <-chan bool, out chan<- []byte) {
-			var psd = make([]byte, 512)
-			for {
-				select {
-				case b := <-in:
-					psd = append(psd, b)
-				case <-stopSig:
-					out <- psd
-					return
-				}
-			}
-		},
-	}
-
-	up        = NewVertex(upPattern)
-	upQuery   = NewVertex(instructionPattern)
-	upAnd     = NewVertex(andPattern)
-	down      = NewVertex(downPattern)
-	downQuery = NewVertex(instructionPattern)
-	downAnd   = NewVertex(andPattern)
-	end       = NewVertex(endPattern)
-
-	parsingGraph *Vertex
+	parsingGraph *vertex.Vertex
 )
 
 func init() {
@@ -159,7 +81,19 @@ func init() {
 	parsingGraph = up
 }
 
-func GenParserFn(ptrn []byte) ParserFn {
+func instructionParserFn(in <-chan byte, stopSig <-chan bool, out chan<- []byte) {
+	var psd = make([]byte, 512)
+	for {
+		select {
+		case b := <-in:
+			psd = append(psd, b)
+		case <-stopSig:
+			out <- psd
+			return
+		}
+	}
+}
+func GenParserFn(ptrn []byte) pattern.ParserFn {
 	return func(in <-chan byte, stopSig <-chan bool, out chan<- []byte) {
 		var (
 			l    = len(ptrn)
