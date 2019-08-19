@@ -1,5 +1,7 @@
 package parser
 
+import "errors"
+
 type (
 	Result struct {
 		Up   []string
@@ -15,9 +17,40 @@ type (
 	}
 	ParserFn func(in <-chan byte, stopSig <-chan bool, out chan<- []byte)
 	Parser   struct {
-		graph *Vertex
+		graph   *Vertex
+		parent  *Vertex
+		in      chan byte
+		stopSig chan bool
+		out     chan []byte
+	}
+
+	Iterator struct {
+		bytes []byte
+		len   int
+		cur   int
 	}
 )
+
+func (i Iterator) HasNext() bool {
+	return i.len > i.cur+1
+}
+
+func (i Iterator) Next() (b byte, err error) {
+	if i.HasNext() {
+		b = i.bytes[i.cur]
+		i.cur++
+		return b, nil
+	}
+	return b, errors.New("")
+}
+
+func NewIterator(bytes []byte) *Iterator {
+	return &Iterator{
+		bytes: bytes,
+		len:   len(bytes),
+		cur:   0,
+	}
+}
 
 func NewVertex(pattern *Pattern, edges ...*Vertex) *Vertex {
 	return &Vertex{
@@ -32,18 +65,40 @@ func (v *Vertex) AddTransitionsTo(vertices ...*Vertex) {
 	}
 }
 
-func New(graph *Vertex) *Parser {
-	return &Parser{graph}
+func (v *Vertex) IsToken() bool {
+	return true
 }
 
-func (p *Parser) Parse(raw []byte) {
-	in := make(chan byte)
-	stopSig := make(chan bool)
-	out := make(chan []byte)
-	for _, b := range raw {
-		in <- b
+func New(graph *Vertex) *Parser {
+	return &Parser{
+		graph:   graph,
+		parent:  graph,
+		in:      make(chan byte),
+		stopSig: make(chan bool),
+		out:     make(chan []byte),
 	}
-	stopSig <- true
+}
+
+func (p *Parser) Parse(raw []byte) (result [][]byte, err error) {
+	iter := NewIterator(raw)
+	for _, v := range p.parent.Edges {
+		go v.Pattern.parserFn(p.in, p.stopSig, p.out)
+	}
+
+	for {
+		select {
+		case parsed := <-p.out:
+			p.stopSig <- true
+			result = append(result, parsed)
+		default:
+			for b, err := iter.Next(); err == nil; {
+				p.in <- b
+			}
+		}
+	}
+
+	p.stopSig <- true
+	return
 }
 
 var (
