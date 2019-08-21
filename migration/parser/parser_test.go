@@ -9,11 +9,11 @@ import (
 )
 
 var (
-	upPattern          = pattern.New("UP", pattern.NewTokenParserFn([]rune("-- <UP>\n")))
-	downPattern        = pattern.New("DOWN", pattern.NewTokenParserFn([]rune("-- <DOWN>\n")))
-	andPattern         = pattern.New("AND", pattern.NewTokenParserFn([]rune("-- <AND>\n")))
-	endPattern         = pattern.New("END", pattern.NewTokenParserFn([]rune("-- <END>\n")))
-	instructionPattern = pattern.New("<DATA>", pattern.DataParserFn)
+	upPattern          = pattern.New("UP", true, pattern.NewTokenParserFn([]rune("-- <UP>\n")))
+	downPattern        = pattern.New("DOWN", true, pattern.NewTokenParserFn([]rune("-- <DOWN>\n")))
+	andPattern         = pattern.New("AND", true, pattern.NewTokenParserFn([]rune("-- <AND>\n")))
+	endPattern         = pattern.New("END", true, pattern.NewTokenParserFn([]rune("-- <END>\n")))
+	instructionPattern = pattern.New("<DATA>", true, pattern.DataParserFn)
 
 	up        = vertex.New(upPattern)
 	upQuery   = vertex.New(instructionPattern)
