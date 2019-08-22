@@ -2,84 +2,75 @@ package vertex
 
 import (
 	"sync"
+
+	"github.com/egoholic/migrator/migration/parser/vertex/parseable"
 )
 
 const STRING_VERTEX_NAME = "<STRING>"
 
 type (
-	ParserFn func(wg sync.WaitGroup, in <-chan rune, stopSig <-chan bool, out chan<- []rune)
-
-	Vertex struct {
-		Name       string
-		Parser     ParserFn
-		IsLenKnown bool
-		Edges      map[string]*Vertex
+	ParsingResult struct {
+		Vertex *Vertex
+		Parsed []rune
+	}
+	ParserFn            func(wg sync.WaitGroup, in <-chan rune, stopSig <-chan bool, out chan<- ParsingResult)
+	ParserFnConstructor func(*Vertex, *parseable.Parseable) ParserFn
+	Vertex              struct {
+		Name        string
+		Parseable   *parseable.Parseable
+		Constructor ParserFnConstructor
+		Edges       map[string]*Vertex
 	}
 )
 
+// Vertex
 // New() is too abstract. Prefer to use either NewToken() or NewString()
-func New(name string, isLenKnown bool, parser ParserFn, transfersTo []*Vertex) *Vertex {
+func New(name string, prl *parseable.Parseable, constructor ParserFnConstructor, vertices []*Vertex) *Vertex {
 	v := &Vertex{
-		Name:       name,
-		Parser:     parser,
-		IsLenKnown: isLenKnown,
+		Name:      name,
+		Parseable: prl,
+		Constructor: constructor,
 	}
-	for _, t := range transfersTo {
-		v.Edges[t.Name] = t
-	}
+	v.MakeEdgesTo(vertices)
 	return v
 }
 
-func NewToken(token string, edges ...*Vertex) *Vertex {
-	return New(token, true, newTokenParserFn([]rune(token)), edges)
+func NewToken(token string, vertices ...*Vertex) *Vertex {
+	prl := parseable.NewParseableToken([]rune(token))
+	return New(token, prl, NewParserFn, vertices)
 }
-func NewString(edges ...*Vertex) *Vertex {
-	return New(STRING_VERTEX_NAME, false, stringParserFn, edges)
+func NewString(vertices ...*Vertex) *Vertex {
+  prl := parseable.NewParseableString()
+	return New(STRING_VERTEX_NAME, prl, NewParserFn, vertices)
 }
-func (v *Vertex) AddEdgesTo(transfersTo ...*Vertex) {
-	for _, t := range transfersTo {
-		v.Edges[t.Name] = t
+func (v *Vertex) MakeEdgesTo(vertices ...*Vertex) {
+	for _, anotherV := range vertices {
+		v.Edges[anotherV.Name] = anotherV
+	}
+}
+func(v *Vertex) ParserFn() ParserFn {
+  return v.Constructor(v, v.Parseable)
+}
+// \Vertex
+
+func NewParsingResult(v *Vertex) ParsingResult {
+	return ParsingResult{
+		Vertex: v,
+		Parsed: nil,
 	}
 }
 
-func newTokenParserFn(token []rune) func(sync.WaitGroup, <-chan rune, <-chan bool, chan<- []rune) {
-	return func(wg sync.WaitGroup, in <-chan rune, stopSig <-chan bool, out chan<- []rune) {
+func NewParserFn(v *Vertex, prl parseable.Parseable) ParserFn {
+	result := NewParsingResult(v)
+	return
+	func(wg sync.WaitGroup, in <-chan rune, stopSig <-chan bool, out chan<- ParsingResult) {
 		defer wg.Done()
-		var (
-			l    = len(token)
-			last = token[l-1]
-			cur  = 0
-			psd  = []rune{}
-		)
 		for {
 			select {
-			case b := <-in:
-				if b != token[cur] {
-					return
-				}
-				psd = append(psd, b)
-				cur++
-				if b == last {
-					out <- psd
-					return
-				}
-			case <-stopSig:
-				return
-			}
-		}
-	}
-}
-func stringParserFn(wg sync.WaitGroup, in <-chan rune, stopSig <-chan bool, out chan<- []rune) {
-	defer wg.Done()
-	psd := make([]rune, 512)
-
-	for {
-		select {
-		case b := <-in:
-			psd = append(psd, b)
-		case <-stopSig:
-			out <- psd
-			return
+			case r := <- in:
+				prl.Match(r)
+			case <- stopSig:
+        return
 		}
 	}
 }
