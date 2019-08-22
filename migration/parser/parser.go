@@ -3,7 +3,7 @@ package parser
 import (
 	"sync"
 
-	"github.com/egoholic/migrator/migration/parser/riter"
+	"github.com/egoholic/migrator/migration/parser/streamer"
 	"github.com/egoholic/migrator/migration/parser/vertex"
 )
 
@@ -26,13 +26,15 @@ func New(graph *vertex.Vertex) *Parser {
 		in:       make(chan rune),
 		stopSig:  make(chan bool),
 		out:      make(chan []rune),
-		result:   [][]rune{},
+		result:   [][]*vertex.ParsingResult,
 	}
 }
-func (p *Parser) Parse(raw []rune) (result []pattern.ParsedOut, err error) {
-	iter := riter.New(raw)
-	if p.entrance.IsLenKnown {
-		p.wg.Add(1)
-		go p.entrance.ParserFn(p.wg, p.in, p.stopSig, p.out)
-	}
+func (p *Parser) Parse(raw []rune) ([][]rune, error) {
+	streamer = streamer.New(raw)
+	pf = p.entrance.ParserFn()
+	p.wg.Add(1)
+	go pf(p.wg, p.in, p.stopSig, p.out)
+	streamer.Stream(p.in)
+	p.wg.Wait()
+	return p.result, nil
 }

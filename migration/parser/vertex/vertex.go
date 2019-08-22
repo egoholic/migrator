@@ -53,8 +53,8 @@ func(v *Vertex) ParserFn() ParserFn {
 }
 // \Vertex
 
-func NewParsingResult(v *Vertex) ParsingResult {
-	return ParsingResult{
+func NewParsingResult(v *Vertex) *ParsingResult {
+	return &ParsingResult{
 		Vertex: v,
 		Parsed: nil,
 	}
@@ -68,7 +68,15 @@ func NewParserFn(v *Vertex, prl parseable.Parseable) ParserFn {
 		for {
 			select {
 			case r := <- in:
-				prl.Match(r)
+				isMatches, isDone := prl.Match(r)
+				if !isMatches {
+
+				}
+
+				if isDone {
+					out <- NewParsingResult(v, prl.Parsed)
+					return
+				}
 			case <- stopSig:
         return
 		}
