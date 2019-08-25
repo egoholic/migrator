@@ -15,7 +15,15 @@ type (
 	}
 	ParserFn            func(wg sync.WaitGroup, in <-chan rune, stopSig <-chan bool, out chan<- ParsingResult)
 	ParserFnConstructor func(*Vertex, *parseable.Parseable) ParserFn
-	Vertex              struct {
+
+	StringVertex struct {
+		Name        string
+		Parseable   *parseable.Parseable
+		Constructor ParserFnConstructor
+		Edges       map[string]*Vertex
+	}
+
+	TokenVertex struct {
 		Name        string
 		Parseable   *parseable.Parseable
 		Constructor ParserFnConstructor
@@ -23,25 +31,26 @@ type (
 	}
 )
 
-// Vertex
-// New() is too abstract. Prefer to use either NewToken() or NewString()
-func New(name string, prl *parseable.Parseable, constructor ParserFnConstructor, vertices []*Vertex) *Vertex {
-	v := &Vertex{
-		Name:      name,
+func NewToken(token string, vertices ...*Vertex) *TokenVertex {
+	prl := parseable.NewParseableToken([]rune(token))
+	v := &TokenVertex{
+		Name:      token,
 		Parseable: prl,
-		Constructor: constructor,
+		Constructor: NewParserFn,
 	}
 	v.MakeEdgesTo(vertices)
 	return v
 }
+func NewString(vertices ...*Vertex) *StringVertex {
+	prl := parseable.NewParseableString()
+	v := &StringVertex{
+		Name:      STRING_VERTEX_NAME,
+		Parseable: prl,
+		Constructor: NewParserFn,
+	}
+	v.MakeEdgesTo(vertices)
+	return v
 
-func NewToken(token string, vertices ...*Vertex) *Vertex {
-	prl := parseable.NewParseableToken([]rune(token))
-	return New(token, prl, NewParserFn, vertices)
-}
-func NewString(vertices ...*Vertex) *Vertex {
-  prl := parseable.NewParseableString()
-	return New(STRING_VERTEX_NAME, prl, NewParserFn, vertices)
 }
 func (v *Vertex) MakeEdgesTo(vertices ...*Vertex) {
 	for _, anotherV := range vertices {
@@ -72,7 +81,6 @@ func NewParserFn(v *Vertex, prl parseable.Parseable) ParserFn {
 				if !isMatches {
 
 				}
-
 				if isDone {
 					out <- NewParsingResult(v, prl.Parsed)
 					return
